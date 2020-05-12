@@ -1,10 +1,9 @@
 <?php
 namespace Yokel\GFeed;
 
-use \Bitrix\Main\Loader,
-    \Bitrix\Main\Type\DateTime,
+use Bitrix\Main\Loader,
+    Bitrix\Main\Type\DateTime,
     Bitrix\Main\Context;
-use Yok\Debug;
 
 /**
  * Class GFeed
@@ -108,7 +107,7 @@ class GFeed {
         // var
         $parentCache = [];
 
-        $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, ['nTopCount' => 1], $this->selectFields);
+        $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, false, $this->selectFields);
         while ($arRes = $dbRes->GetNext()) {
             $element = [
                 'ID' => $arRes['ID'],
@@ -130,7 +129,7 @@ class GFeed {
                     $element['PARENT'] = $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']];
                 } else {
                     $dbParent = \CIBlockElement::GetByID($arRes['PROPERTY_CML2_LINK_VALUE']);
-                    if ($obParent = $dbParent->GetNextElement) {
+                    if ($obParent = $dbParent->GetNextElement()) {
                         $arParent = $obParent->GetFields();
                         $arParent['PROPS'] = $obParent->GetProperties();
 
@@ -141,6 +140,7 @@ class GFeed {
                             'TEXT' => empty($arParent['PREVIEW_TEXT']) ?
                                 strip_tags($arParent['DETAIL_TEXT']) :
                                 strip_tags($arParent['PREVIEW_TEXT']),
+                            'PROPS' => $arParent['PROPS']
                         ];
                         $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']] = $element['PARENT'];
                     }
@@ -265,6 +265,11 @@ class GFeed {
         });
     }
 
+    /**
+     * Экспорт файла в указанном формате
+     * @param $fileName
+     * @param string $format
+     */
     public function export($fileName, $format = self::FORMAT_XML) {
         // init params
         $this->fileName = $_SERVER['DOCUMENT_ROOT'].$fileName;
