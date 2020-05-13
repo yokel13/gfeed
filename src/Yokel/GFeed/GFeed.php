@@ -95,7 +95,7 @@ class GFeed {
         'description' => '.TEXT',
         'condition' => self::PRODUCT_NEW_XML,
         'availability' => '.AVAILABLE_XML',
-        'image_link' => '.IMG',
+        'image_link' => '.MORE_PHOTO',
         'identifier_exists' => 'no'
     ];
 
@@ -111,7 +111,7 @@ class GFeed {
         'id' => '.ID',
         'title' => '.NAME',
         'link' => '.LINK',
-        'image_link' => '.IMG',
+        'image_link' => '.MORE_PHOTO',
         'price' => '',
         'description' => '.TEXT',
         'availability' => '.AVAILABLE_CSV',
@@ -131,6 +131,7 @@ class GFeed {
     public $debug = false;
 
     /**
+     * Получает информацию о сайте из БД
      * @return void
      */
     private function getSiteInfo() {
@@ -196,6 +197,7 @@ class GFeed {
         // var
         $parentCache = [];
 
+        // в режиме отладки найти 1 товар
         if ($this->debug) {
             $arNavStartParams = [
                 'nTopCount' => 1
@@ -206,6 +208,13 @@ class GFeed {
 
         $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, $arNavStartParams, $this->selectFields);
         while ($arRes = $dbRes->GetNext()) {
+            $morePhoto = [];
+            if (!empty($arRes['PROPERTY_MORE_PHOTO_VALUE'])) {
+                foreach ($arRes['PROPERTY_MORE_PHOTO_VALUE'] as $photoId) {
+                    $morePhoto[] = $this->getUrl(\CFile::GetPath($photoId));
+                }
+            }
+
             $element = [
                 'ID' => $arRes['ID'],
                 'NAME' => $arRes['NAME'],
@@ -224,7 +233,8 @@ class GFeed {
                 'AVAILABLE_CSV' => $arRes['CATALOG_QUANTITY'] > 0 ?
                     self::PRODUCTS_AVAILABLE_CSV :
                     self::PRODUCTS_NOT_AVAILABLE_CSV,
-                'PRICE' => $this->getPrice($arRes['ID'])
+                'PRICE' => $this->getPrice($arRes['ID']),
+                'MORE_PHOTO' => $morePhoto
             ];
 
             if ($arRes['PROPERTY_CML2_LINK_VALUE'] > 0) {
@@ -266,7 +276,11 @@ class GFeed {
         } else {
             $macro = explode('.', $field);
             if ($macro[0] === '' || $macro[0] === 'element') {
-                $value = $item[$macro[1]];
+                if (is_array($item[$macro[1]])) {
+                    $value = reset($item[$macro[1]]);
+                } else {
+                    $value = $item[$macro[1]];
+                }
             } else {
                 $value = $field;
             }
@@ -297,35 +311,36 @@ class GFeed {
     }
 
     /**
+     * Записывает узел в xml
      * @param $item
      */
     private function writeItemNode($item) {
-        // open
+        // открыть
         $this->writeXml('<item>');
 
-        // content
+        // контент
         foreach ($this->mappingXml as $tag=>$field) {
             $str = sprintf('<g:%s>%s</g:%s>', $tag, $this->getValue($field, $item), $tag);
             $this->writeXml($str);
         }
 
-        // close
+        // закрыть
         $this->writeXml('</item>');
     }
 
     /**
-     *
+     * Заполняет xml-файл
      */
     private function createXml() {
-        // first delete old file
+        // сначала удалить старый файл
         if (file_exists($this->fileNameXml)) {
             unlink($this->fileNameXml);
         }
 
-        // Маппинг
+        // маппинг
         $this->mappingXml = array_merge($this->mappingXml, $this->mappingXmlExt);
 
-        // header
+        // заголовок
         $this->writeXml('<?xml version="1.0"?>');
         $this->writeXml('<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">');
         $this->writeXml('<channel>');
@@ -333,12 +348,12 @@ class GFeed {
         $this->writeXml('<link>'.$this->siteInfo['url'].'</link>');
         $this->writeXml('<description></description>');
 
-        // elements
+        // записать товары
         foreach ($this->elements as $item) {
             $this->writeItemNode($item);
         }
 
-        // closing tags
+        // закрыть теги
         $this->writeXml('</channel>');
         $this->writeXml('</rss>');
     }
@@ -408,6 +423,7 @@ class GFeed {
     }
 
     /**
+     * Setter iblockId
      * @param mixed $iblockId
      */
     public function setIblockId($iblockId) {
@@ -415,6 +431,7 @@ class GFeed {
     }
 
     /**
+     * Setter priceField
      * @param mixed $priceField
      */
     public function setPriceField($priceField) {
@@ -449,10 +466,11 @@ class GFeed {
      * @param string $format
      */
     public function export($fileName, $format = self::FORMAT_XML) {
-        // init params
+        // инициализируем параметры для выборки
         $this->createSelectFields();
         $this->createFilter();
 
+        // получение списка товаров
         if (empty($this->elements)) {
             $this->obtainElements();
         }
