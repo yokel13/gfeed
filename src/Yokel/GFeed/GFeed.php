@@ -1,4 +1,10 @@
 <?php
+
+/**
+ * @author      Andrey Konovalov <hello@yokel.tech>
+ * @copyright   Copyright (c), 2020 Andrey Konovalov
+ * @license     MIT public license
+ */
 namespace Yokel\GFeed;
 
 use Bitrix\Main\Loader,
@@ -12,36 +18,117 @@ use Bitrix\Main\Loader,
  */
 class GFeed {
 
-    const PRODUCT_AVAILABLE = 'в наличии';
-    const PRODUCT_NOT_AVAILABLE = 'нет в наличии';
+    const PRODUCT_AVAILABLE_XML = 'в наличии';
+    const PRODUCT_NOT_AVAILABLE_XML = 'нет в наличии';
+    const PRODUCT_NEW_XML = 'новый';
+    const PRODUCTS_AVAILABLE_CSV = 'in stock';
+    const PRODUCTS_NOT_AVAILABLE_CSV = 'out of stock';
+    const PRODUCT_NEW_CSV = 'new';
     const FORMAT_XML = 'xml';
     const FORMAT_CSV = 'csv';
 
+    /**
+     * @var string Протокол (http|https)
+     */
     private $protocol;
+
+    /**
+     * @var string Идентификатор сайта
+     */
     private $siteId;
+
+    /**
+     * @var array Параметры сайта
+     */
     private $siteInfo = [];
+
+    /**
+     * @var int Идентификатор инфоблока с товарами
+     */
     private $iblockId;
+
+    /**
+     * @var string Код поля с ценой (для фильтрации)
+     */
     private $priceField;
-    private $fileName;
+
+    /**
+     * @var string Путь к файлу xml
+     */
+    private $fileNameXml;
+
+    /**
+     * @var string Путь к файлу csv
+     */
+    private $fileNameCsv;
+
+    /**
+     * @var array Список товаров
+     */
     private $elements = [];
+
+    /**
+     * @var array Сортировка для выборки товаров
+     */
     private $sort = [];
+
+    /**
+     * @var array Выбираемые поля товара
+     */
     private $selectFields = [
-        "ID", "IBLOCK_ID", "CODE", "TIMESTAMP_X", "IBLOCK_SECTION_ID", "NAME", "PREVIEW_PICTURE",
-        "DETAIL_PICTURE", "DETAIL_PAGE_URL", "DETAIL_TEXT", "PREVIEW_TEXT", 'PROPERTY_CML2_LINK'
+        'ID', 'IBLOCK_ID', 'CODE', 'TIMESTAMP_X', 'IBLOCK_SECTION_ID', 'NAME', 'PREVIEW_PICTURE', 'PROPERTY_MORE_PHOTO',
+        'DETAIL_PICTURE', 'DETAIL_PAGE_URL', 'DETAIL_TEXT', 'PREVIEW_TEXT', 'PROPERTY_CML2_LINK'
     ];
+
+    /**
+     * @var array Фильтр для товаров
+     */
     private $filter;
 
-    private $mapping = [
+    /**
+     * @var array Маппинг полей для xml
+     */
+    private $mappingXml = [
         'id' => '.ID',
         'title' => '.NAME',
         'link' => '.LINK',
         'description' => '.TEXT',
-        'condition' => 'новый',
-        'availability' => '.AVAILABLE',
+        'condition' => self::PRODUCT_NEW_XML,
+        'availability' => '.AVAILABLE_XML',
         'image_link' => '.IMG',
         'identifier_exists' => 'no'
     ];
-    private $mappingExt = [];
+
+    /**
+     * @var array Кастомный маппинг для xml
+     */
+    private $mappingXmlExt = [];
+
+    /**
+     * @var array Маппинг полей для csv
+     */
+    private $mappingCsv = [
+        'id' => '.ID',
+        'title' => '.NAME',
+        'link' => '.LINK',
+        'image_link' => '.IMG',
+        'price' => '',
+        'description' => '.TEXT',
+        'availability' => '.AVAILABLE_CSV',
+        'condition' => self::PRODUCT_NEW_CSV,
+        'brand' => '',
+        'google_product_category' => ''
+    ];
+
+    /**
+     * @var array Кастомный маппинг для csv
+     */
+    private $mappingCsvExt = [];
+
+    /**
+     * @var bool Режим отладки
+     */
+    public $debug = false;
 
     /**
      * @return void
@@ -62,6 +149,7 @@ class GFeed {
     }
 
     /**
+     * Формирует url относительно сайта
      * @param $url
      * @return string
      */
@@ -70,24 +158,25 @@ class GFeed {
     }
 
     /**
-     *
+     * Поля для выборки
      */
     private function createSelectFields() {
         $this->selectFields[] = $this->priceField;
     }
 
     /**
-     *
+     * Создаёт фильтр для выборки
      */
     private function createFilter() {
         $this->filter = [
-            "IBLOCK_ID" => $this->iblockId,
-            "ACTIVE" => "Y",
-            ">=".$this->priceField => 0
+            'IBLOCK_ID' => $this->iblockId,
+            'ACTIVE' => 'Y',
+            '>='.$this->priceField => 0
         ];
     }
 
     /**
+     * Возвращает цену товара
      * @param $productId
      * @return array
      */
@@ -101,26 +190,40 @@ class GFeed {
     }
 
     /**
-     *
+     * Получает список товаров
      */
     private function obtainElements() {
         // var
         $parentCache = [];
 
-        $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, false, $this->selectFields);
+        if ($this->debug) {
+            $arNavStartParams = [
+                'nTopCount' => 1
+            ];
+        } else {
+            $arNavStartParams = false;
+        }
+
+        $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, $arNavStartParams, $this->selectFields);
         while ($arRes = $dbRes->GetNext()) {
             $element = [
                 'ID' => $arRes['ID'],
                 'NAME' => $arRes['NAME'],
-                'SECTION_ID' => $arRes["IBLOCK_SECTION_ID"],
-                'LINK' => $this->getUrl($arRes["DETAIL_PAGE_URL"]),
-                'IMG' => $this->getUrl($arRes["DETAIL_PICTURE"] > 0 ?
-                    \CFile::GetPath($arRes["DETAIL_PICTURE"]) :
-                    \CFile::GetPath($arRes["PREVIEW_PICTURE"])),
+                'SECTION_ID' => $arRes['IBLOCK_SECTION_ID'],
+                'LINK' => $this->getUrl($arRes['DETAIL_PAGE_URL']),
+                'IMG' => $this->getUrl($arRes['DETAIL_PICTURE'] > 0 ?
+                    \CFile::GetPath($arRes['DETAIL_PICTURE']) :
+                    \CFile::GetPath($arRes['PREVIEW_PICTURE'])),
                 'TEXT' => empty($arRes['PREVIEW_TEXT']) ?
                     strip_tags($arRes['DETAIL_TEXT']) :
                     strip_tags($arRes['PREVIEW_TEXT']),
-                'AVAILABLE' => $arRes["CATALOG_QUANTITY"] > 0 ? self::PRODUCT_AVAILABLE : self::PRODUCT_NOT_AVAILABLE,
+                'AVAILABLE' => $arRes['CATALOG_QUANTITY'] > 0,
+                'AVAILABLE_XML' => $arRes['CATALOG_QUANTITY'] > 0 ?
+                    self::PRODUCT_AVAILABLE_XML :
+                    self::PRODUCT_NOT_AVAILABLE_XML,
+                'AVAILABLE_CSV' => $arRes['CATALOG_QUANTITY'] > 0 ?
+                    self::PRODUCTS_AVAILABLE_CSV :
+                    self::PRODUCTS_NOT_AVAILABLE_CSV,
                 'PRICE' => $this->getPrice($arRes['ID'])
             ];
 
@@ -152,6 +255,27 @@ class GFeed {
     }
 
     /**
+     * Вычисляет значение поля
+     * @param $field
+     * @param $item
+     * @return mixed
+     */
+    private function getValue($field, $item) {
+        if (is_callable($field)) {
+            $value = $field($item);
+        } else {
+            $macro = explode('.', $field);
+            if ($macro[0] === '' || $macro[0] === 'element') {
+                $value = $item[$macro[1]];
+            } else {
+                $value = $field;
+            }
+        }
+
+        return $value;
+    }
+
+    /**
      * @param $string
      * @return null|string|string[]
      */
@@ -164,11 +288,12 @@ class GFeed {
     }
 
     /**
+     * Записывает xml в файл
      * @param $str
      * @return bool|int
      */
     private function writeXml($str) {
-        return file_put_contents($this->fileName, $str.PHP_EOL, FILE_APPEND);
+        return file_put_contents($this->fileNameXml, $str.PHP_EOL, FILE_APPEND);
     }
 
     /**
@@ -179,19 +304,8 @@ class GFeed {
         $this->writeXml('<item>');
 
         // content
-        foreach ($this->mapping as $tag=>$field) {
-            if (is_callable($field)) {
-                $value = $field($item);
-            } else {
-                $macro = explode('.', $field);
-                if ($macro[0] === '' || $macro[0] === 'element') {
-                    $value = $item[$macro[1]];
-                } else {
-                    $value = $field;
-                }
-            }
-
-            $str = sprintf('<g:%s>%s</g:%s>', $tag, $value, $tag);
+        foreach ($this->mappingXml as $tag=>$field) {
+            $str = sprintf('<g:%s>%s</g:%s>', $tag, $this->getValue($field, $item), $tag);
             $this->writeXml($str);
         }
 
@@ -204,12 +318,12 @@ class GFeed {
      */
     private function createXml() {
         // first delete old file
-        if (file_exists($this->fileName)) {
-            unlink($this->fileName);
+        if (file_exists($this->fileNameXml)) {
+            unlink($this->fileNameXml);
         }
 
-        // prepare mapping
-        $this->mapping = array_merge($this->mapping, $this->mappingExt);
+        // Маппинг
+        $this->mappingXml = array_merge($this->mappingXml, $this->mappingXmlExt);
 
         // header
         $this->writeXml('<?xml version="1.0"?>');
@@ -227,6 +341,70 @@ class GFeed {
         // closing tags
         $this->writeXml('</channel>');
         $this->writeXml('</rss>');
+    }
+
+    /**
+     * Записывает строку в csv-файл
+     * @param $csv_arr
+     * @param string $delimiter
+     * @param string $enclosure
+     * @return bool|int
+     */
+    private function fputcsv($csv_arr, $delimiter = ';', $enclosure = '"') {
+        if (!is_array($csv_arr)) {
+            return(false);
+        }
+
+        for ($i = 0, $n = count($csv_arr); $i < $n;  $i ++) {
+            if (!is_numeric($csv_arr[$i])) {
+                $csv_arr[$i] =  $enclosure.str_replace($enclosure, $enclosure.$enclosure,  $csv_arr[$i]).$enclosure;
+            }
+
+            if (($delimiter === '.') && (is_numeric($csv_arr[$i]))) {
+                $csv_arr[$i] =  $enclosure.$csv_arr[$i].$enclosure;
+            }
+        }
+        $str = implode($delimiter,  $csv_arr).PHP_EOL;
+        file_put_contents($this->fileNameCsv, $str, FILE_APPEND);
+
+        return strlen($str);
+    }
+
+    /**
+     * Формирует массив для записи в csv-файл
+     * @param $item
+     * @return bool|int
+     */
+    private function writeCsvRow($item) {
+        // var
+        $row = [];
+
+        foreach ($this->mappingCsv as $tag=>$field) {
+            $row[] = $this->getValue($field, $item);
+        }
+
+        return $this->fputcsv($row);
+    }
+
+    /**
+     * Создаёт csv-файл
+     */
+    private function createCsv() {
+        // Сначала удалить старый файл
+        if (file_exists($this->fileNameCsv)) {
+            unlink($this->fileNameCsv);
+        }
+
+        // Маппинг
+        $this->mappingCsv = array_merge($this->mappingCsv, $this->mappingCsvExt);
+
+        // Заголовки столбцов
+        $this->fputcsv(array_keys($this->mappingCsv));
+
+        // Товары
+        foreach ($this->elements as $item) {
+            $this->writeCsvRow($item);
+        }
     }
 
     /**
@@ -249,18 +427,18 @@ class GFeed {
      * @param bool $siteId
      */
     public function __construct($protocol = 'http', $siteId = null) {
-        // include bitrix modules
+        // use
         Loader::includeModule('iblock');
         Loader::includeModule('catalog');
         Loader::includeModule('sale');
 
-        // params
+        // Параметры
         $this->siteId = $siteId ?? Context::getCurrent()->getSite();
         $this->protocol = $protocol.'://';
         $this->getSiteInfo();
 
-        // complex mapping
-        $this->addMapping('price', function ($item) {
+        // Цена товара с валютой
+        $this->addMappingAll('price', function ($item) {
             return $item['PRICE']['PRICE'].' '.$item['PRICE']['CURRENCY'];
         });
     }
@@ -272,7 +450,6 @@ class GFeed {
      */
     public function export($fileName, $format = self::FORMAT_XML) {
         // init params
-        $this->fileName = $_SERVER['DOCUMENT_ROOT'].$fileName;
         $this->createSelectFields();
         $this->createFilter();
 
@@ -282,17 +459,42 @@ class GFeed {
 
         switch ($format) {
             case self::FORMAT_XML:
+                $this->fileNameXml = $_SERVER['DOCUMENT_ROOT'].$fileName;
                 $this->createXml();
+                break;
+            case self::FORMAT_CSV:
+                $this->fileNameCsv = $_SERVER['DOCUMENT_ROOT'].$fileName;
+                $this->createCsv();
                 break;
         }
     }
 
     /**
+     * Добавляет кастомный маппинг для xml
      * @param $name
      * @param $value
      */
-    public function addMapping($name, $value) {
-        $this->mappingExt[$name] = $value;
+    public function addMappingXml($name, $value) {
+        $this->mappingXmlExt[$name] = $value;
+    }
+
+    /**
+     * Добавляет кастомный маппинг для csv
+     * @param $name
+     * @param $value
+     */
+    public function addMappingCsv($name, $value) {
+        $this->mappingCsvExt[$name] = $value;
+    }
+
+    /**
+     * Добавляет кастомный маппинг для всех форматов
+     * @param $name
+     * @param $value
+     */
+    public function addMappingAll($name, $value) {
+        $this->mappingXmlExt[$name] = $value;
+        $this->mappingCsvExt[$name] = $value;
     }
 
 }
