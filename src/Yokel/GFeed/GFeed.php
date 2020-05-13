@@ -95,7 +95,7 @@ class GFeed {
         'description' => '.TEXT',
         'condition' => self::PRODUCT_NEW_XML,
         'availability' => '.AVAILABLE_XML',
-        'image_link' => '.MORE_PHOTO',
+        'image_link' => '.IMG',
         'identifier_exists' => 'no'
     ];
 
@@ -111,7 +111,7 @@ class GFeed {
         'id' => '.ID',
         'title' => '.NAME',
         'link' => '.LINK',
-        'image_link' => '.MORE_PHOTO',
+        'image_link' => '.IMG',
         'price' => '',
         'description' => '.TEXT',
         'availability' => '.AVAILABLE_CSV',
@@ -215,14 +215,22 @@ class GFeed {
                 }
             }
 
+            // картинка товара
+            $img = false;
+            if ($arRes['DETAIL_PICTURE'] > 0) {
+                $img = $this->getUrl(\CFile::GetPath($arRes['DETAIL_PICTURE']));
+            } elseif ($arRes['PREVIEW_PICTURE'] > 0) {
+                $img = $this->getUrl(\CFile::GetPath($arRes['PREVIEW_PICTURE']));
+            } elseif (!empty($morePhoto)) {
+                $img = $morePhoto[0];
+            }
+
             $element = [
                 'ID' => $arRes['ID'],
                 'NAME' => $arRes['NAME'],
                 'SECTION_ID' => $arRes['IBLOCK_SECTION_ID'],
                 'LINK' => $this->getUrl($arRes['DETAIL_PAGE_URL']),
-                'IMG' => $this->getUrl($arRes['DETAIL_PICTURE'] > 0 ?
-                    \CFile::GetPath($arRes['DETAIL_PICTURE']) :
-                    \CFile::GetPath($arRes['PREVIEW_PICTURE'])),
+                'IMG' => $img,
                 'TEXT' => empty($arRes['PREVIEW_TEXT']) ?
                     strip_tags($arRes['DETAIL_TEXT']) :
                     strip_tags($arRes['PREVIEW_TEXT']),
@@ -256,6 +264,19 @@ class GFeed {
                             'PROPS' => $arParent['PROPS']
                         ];
                         $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']] = $element['PARENT'];
+                    }
+                }
+
+                // если картинка не нашлась в ТП
+                if (!$img) {
+                    if ($element['PARENT']['DETAIL_PICTURE'] > 0) {
+                        $element['IMG'] = $this->getUrl(\CFile::GetPath($element['PARENT']['DETAIL_PICTURE']));
+                    } elseif ($element['PARENT']['PREVIEW_PICTURE'] > 0) {
+                        $element['IMG'] = $this->getUrl(\CFile::GetPath($element['PARENT']['PREVIEW_PICTURE']));
+                    } elseif (!empty($element['PARENT']['PROPS']['MORE_PHOTO']['VALUE'])) {
+                        $element['IMG'] = $this->getUrl(
+                            \CFile::GetPath($element['PARENT']['PROPS']['MORE_PHOTO']['VALUE'][0])
+                        );
                     }
                 }
             }
