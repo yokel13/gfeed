@@ -191,6 +191,16 @@ class GFeed {
     }
 
     /**
+     * Получает информацию о разделе
+     * @param $id
+     * @return mixed
+     */
+    private function getSection($id) {
+        $dbRes = \CIBlockSection::GetByID($id);
+        return $dbRes->GetNext();
+    }
+
+    /**
      * Получает список товаров
      */
     private function obtainElements() {
@@ -246,6 +256,7 @@ class GFeed {
             ];
 
             if ($arRes['PROPERTY_CML2_LINK_VALUE'] > 0) {
+                // это торговое предложение
                 if (array_key_exists($arRes['PROPERTY_CML2_LINK_VALUE'], $parentCache)) {
                     $element['PARENT'] = $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']];
                 } else {
@@ -258,11 +269,15 @@ class GFeed {
                             'ID' => $arParent['ID'],
                             'NAME' => $arParent['NAME'],
                             'LINK' => $this->getUrl($arParent["DETAIL_PAGE_URL"]),
+                            'SECTION' => $this->getSection($arParent['IBLOCK_SECTION_ID']),
                             'TEXT' => empty($arParent['PREVIEW_TEXT']) ?
                                 strip_tags($arParent['DETAIL_TEXT']) :
                                 strip_tags($arParent['PREVIEW_TEXT']),
                             'PROPS' => $arParent['PROPS']
                         ];
+                        $element['PARENT']['SECTION_ID'] = $element['PARENT']['SECTION']['ID'];
+                        $element['PARENT']['SECTION_CODE'] = $element['PARENT']['SECTION']['CODE'];
+
                         $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']] = $element['PARENT'];
                     }
                 }
@@ -279,6 +294,10 @@ class GFeed {
                         );
                     }
                 }
+            } else {
+                // это простой товар
+                $element['SECTION'] = $this->getSection($element['SECTION_ID']);
+                $element['SECTION_CODE'] = $element['SECTION']['CODE'];
             }
 
             $this->elements[] = $element;
@@ -302,6 +321,8 @@ class GFeed {
                 } else {
                     $value = $item[$macro[1]];
                 }
+            } elseif ($macro[0] === 'parent') {
+                $value = $item['PARENT'][$macro[1]];
             } else {
                 $value = $field;
             }
