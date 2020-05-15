@@ -86,20 +86,33 @@ $feed->addMappingXml('custom_label_0', 'parent.SECTION_CODE');
 ```
 
 Доступные макросы для товара:
+
 .ID - id товара в инфоблоке
+
 .NAME - название товара
+
 .SECTION_ID - id раздела в инфоблоке
+
 .SECTION_CODE - код раздела в инфоблоке
+
 .LINK - ссылка на карточку товара
+
 .IMG - ссылка на картинку товара (PREVIEW_PICTURE или DETAIL_PICTURE или первая из MORE_PHOTO)
+
 .TEXT - описание товара (PREVIEW_TEXT или DETAIL_TEXT)
 
 Доступные макросы для родительского товара:
+
 parent.ID - id родительского товара в инфоблоке
+
 parent.NAME - название родительского товара
+
 parent.SECTION_ID - id раздела родительского в инфоблоке
+
 parent.SECTION_CODE - код раздела родительского в инфоблоке
+
 parent.LINK - ссылка на карточку родительского товара
+
 parent.TEXT - описание родительского товара (PREVIEW_TEXT или DETAIL_TEXT)
 
 - Вычисляемое значение
