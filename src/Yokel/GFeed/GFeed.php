@@ -10,6 +10,7 @@ namespace Yokel\GFeed;
 use Bitrix\Main\Loader,
     Bitrix\Main\Type\DateTime,
     Bitrix\Main\Context;
+use Yok\Debug;
 
 /**
  * Class GFeed
@@ -26,6 +27,7 @@ class GFeed {
     const PRODUCT_NEW_CSV = 'new';
     const FORMAT_XML = 'xml';
     const FORMAT_CSV = 'csv';
+    const FORMAT_YML = 'yml';
 
     /**
      * @var string Протокол (http|https)
@@ -48,6 +50,11 @@ class GFeed {
     private $iblockId;
 
     /**
+     * @var int Идентификатор родительского инфоблока (для торговых предложений)
+     */
+    private $parentIblockId;
+
+    /**
      * @var string Код поля с ценой (для фильтрации)
      */
     private $priceField;
@@ -61,6 +68,11 @@ class GFeed {
      * @var string Путь к файлу csv
      */
     private $fileNameCsv;
+
+    /**
+     * @var string Путь к файлу yml
+     */
+    private $fileNameYml;
 
     /**
      * @var array Список товаров
@@ -77,7 +89,7 @@ class GFeed {
      */
     private $selectFields = [
         'ID', 'IBLOCK_ID', 'CODE', 'TIMESTAMP_X', 'IBLOCK_SECTION_ID', 'NAME', 'PREVIEW_PICTURE', 'PROPERTY_MORE_PHOTO',
-        'DETAIL_PICTURE', 'DETAIL_PAGE_URL', 'DETAIL_TEXT', 'PREVIEW_TEXT', 'PROPERTY_CML2_LINK'
+        'DETAIL_PICTURE', 'DETAIL_PAGE_URL', 'DETAIL_TEXT', 'PREVIEW_TEXT', 'PROPERTY_CML2_LINK', 'PROPERTY_SEASON'
     ];
 
     /**
@@ -217,10 +229,13 @@ class GFeed {
         }
 
         $dbRes = \CIBlockElement::GetList($this->sort, $this->filter, false, $arNavStartParams, $this->selectFields);
-        while ($arRes = $dbRes->GetNext()) {
+        while ($obRes = $dbRes->GetNextElement()) {
+            $arRes = $obRes->GetFields();
+            $arRes['PROPS'] = $obRes->GetProperties();
+
             $morePhoto = [];
-            if (!empty($arRes['PROPERTY_MORE_PHOTO_VALUE'])) {
-                foreach ($arRes['PROPERTY_MORE_PHOTO_VALUE'] as $photoId) {
+            if (!empty($arRes['PROPS']['MORE_PHOTO']['VALUE'])) {
+                foreach ($arRes['PROPS']['MORE_PHOTO']['VALUE'] as $photoId) {
                     $morePhoto[] = $this->getUrl(\CFile::GetPath($photoId));
                 }
             }
@@ -252,15 +267,16 @@ class GFeed {
                     self::PRODUCTS_AVAILABLE_CSV :
                     self::PRODUCTS_NOT_AVAILABLE_CSV,
                 'PRICE' => $this->getPrice($arRes['ID']),
-                'MORE_PHOTO' => $morePhoto
+                'MORE_PHOTO' => $morePhoto,
+                'PROPS' => $arRes['PROPS']
             ];
 
             if ($arRes['PROPERTY_CML2_LINK_VALUE'] > 0) {
                 // это торговое предложение
-                if (array_key_exists($arRes['PROPERTY_CML2_LINK_VALUE'], $parentCache)) {
-                    $element['PARENT'] = $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']];
+                if (array_key_exists($arRes['PROPS']['CML2_LINK']['VALUE'], $parentCache)) {
+                    $element['PARENT'] = $parentCache[$arRes['PROPS']['CML2_LINK']['VALUE']];
                 } else {
-                    $dbParent = \CIBlockElement::GetByID($arRes['PROPERTY_CML2_LINK_VALUE']);
+                    $dbParent = \CIBlockElement::GetByID($arRes['PROPS']['CML2_LINK']['VALUE']);
                     if ($obParent = $dbParent->GetNextElement()) {
                         $arParent = $obParent->GetFields();
                         $arParent['PROPS'] = $obParent->GetProperties();
@@ -278,7 +294,7 @@ class GFeed {
                         $element['PARENT']['SECTION_ID'] = $element['PARENT']['SECTION']['ID'];
                         $element['PARENT']['SECTION_CODE'] = $element['PARENT']['SECTION']['CODE'];
 
-                        $parentCache[$arRes['PROPERTY_CML2_LINK_VALUE']] = $element['PARENT'];
+                        $parentCache[$arRes['PROPS']['CML2_LINK']['VALUE']] = $element['PARENT'];
                     }
                 }
 
@@ -301,6 +317,21 @@ class GFeed {
             }
 
             $this->elements[] = $element;
+        }
+    }
+
+    private function obtainSection() {
+        $rsSections = \CIBlockSection::GetList(
+            [
+                'ID' => 'ASC'
+            ],
+            [
+                'IBLOCK_ID' => $this->parentIblockId,
+                'GLOBAL_ACTIVE' => 'Y'
+            ]
+        );
+        while ($arSection = $rsSections->Fetch()) {
+            $sections[] = $arSection;
         }
     }
 
@@ -465,11 +496,97 @@ class GFeed {
     }
 
     /**
+     * Записывает yml в файл
+     * @param $str
+     * @param string $escapeChar
+     * @return bool|int
+     */
+    private function writeYml($str, $escapeChar = PHP_EOL) {
+        return file_put_contents($this->fileNameYml, $str.$escapeChar, FILE_APPEND);
+    }
+
+    /**
+     * Открывает тег
+     * @param $tag
+     * @param array $params
+     * @param bool $escape
+     * @return bool|int
+     */
+    private function openTag($tag, $params = [], $escape = false) {
+        $tag = "<$tag";
+        if (!empty($params)) {
+            $arParams = [];
+            foreach ($params as $key=>$value) {
+                $arParams[] = $key.'="'.$value.'"';
+            }
+            $tag .= ' '.implode(' ', $arParams);
+        }
+        $tag .= ">";
+
+        return $this->writeYml($tag, $escape ? PHP_EOL : '');
+    }
+
+    /**
+     * Закрывает тег
+     * @param $tag
+     * @return bool|int
+     */
+    private function closeTag($tag) {
+        return $this->writeYml("</$tag>");
+    }
+
+    /**
+     * Записывает тег
+     * @param $tag
+     * @param $value
+     * @param array $params
+     */
+    private function addTag($tag, $value, $params = []) {
+        $this->openTag($tag, $params);
+        $this->writeYml($value, '');
+        $this->closeTag($tag);
+    }
+
+    /**
+     * Создаёт yml-файл
+     */
+    private function createYml() {
+        // Сначала удалить старый файл
+        if (file_exists($this->fileNameYml)) {
+            unlink($this->fileNameYml);
+        }
+
+        // заголовок
+        $this->writeYml('<?xml version="1.0" encoding="utf-8"?>');
+        $this->openTag('yml_catalog', [
+            'date' => date('Y-m-d H:i')
+        ], true);
+        $this->openTag('shop', [], true);
+        $this->addTag('name', $this->siteInfo['siteName']);
+        $this->addTag('company', $this->siteInfo['siteName']);
+        $this->addTag('agency', 'LIGHTHOUSE');
+        $this->addTag('url', $this->siteInfo['url']);
+
+        // валюты
+
+        // категории
+
+        // товары
+        $this->addTag('cpa', '1');
+
+        // закрыть теги
+        $this->closeTag('shop');
+        $this->closeTag('yml_catalog');
+    }
+
+    /**
      * Setter iblockId
      * @param mixed $iblockId
+     * @param $parentIblockId
      */
-    public function setIblockId($iblockId) {
+    public function setIblockId($iblockId, $parentIblockId = 0) {
         $this->iblockId = $iblockId;
+        $this->parentIblockId = $parentIblockId;
     }
 
     /**
@@ -525,6 +642,10 @@ class GFeed {
             case self::FORMAT_CSV:
                 $this->fileNameCsv = $_SERVER['DOCUMENT_ROOT'].$fileName;
                 $this->createCsv();
+                break;
+            case self::FORMAT_YML:
+                $this->fileNameYml = $_SERVER['DOCUMENT_ROOT'].$fileName;
+                $this->createYml();
                 break;
         }
     }
