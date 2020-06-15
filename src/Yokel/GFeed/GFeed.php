@@ -97,6 +97,16 @@ class GFeed {
     private $filter;
 
     /**
+     * @var array Расширение для фильтра по товарам
+     */
+    private $filterExt = [];
+
+    /**
+     * @var array Дополнительный фильтр для результатов основной выборки
+     */
+    private $filterResultExt = [];
+
+    /**
      * @var array Маппинг полей для xml
      */
     private $mappingXml = [
@@ -104,7 +114,7 @@ class GFeed {
         'title' => '.NAME',
         'link' => '.LINK',
         'description' => '.TEXT',
-        'condition' => self::PRODUCT_NEW_XML,
+        'condition' => self::PRODUCT_NEW_CSV,
         'availability' => '.AVAILABLE_XML',
         'image_link' => '.IMG',
         'identifier_exists' => 'no'
@@ -182,7 +192,7 @@ class GFeed {
      * @param $url
      * @return string
      */
-    private function getUrl($url) {
+    public function getUrl($url) {
         return $this->siteInfo['url'].$url;
     }
 
@@ -197,11 +207,14 @@ class GFeed {
      * Создаёт фильтр для выборки
      */
     private function createFilter() {
-        $this->filter = [
-            'IBLOCK_ID' => $this->iblockId,
-            'ACTIVE' => 'Y',
-            '>='.$this->priceField => 0
-        ];
+        $this->filter = array_merge(
+            [
+                'IBLOCK_ID' => $this->iblockId,
+                'ACTIVE' => 'Y',
+                '>='.$this->priceField => 0
+            ],
+            $this->filterExt
+        );
     }
 
     /**
@@ -226,6 +239,26 @@ class GFeed {
     private function getSection($id) {
         $dbRes = \CIBlockSection::GetByID($id);
         return $dbRes->GetNext();
+    }
+
+    /**
+     * Получает id элементов с учётом дополнительных фильтров для форматов
+     * @param $format
+     * @return array
+     */
+    private function filterResult($format) {
+        // var
+        $result = [];
+
+        if (!empty($this->filterResultExt[$format])) {
+            $filter = array_merge($this->filter, $this->filterResultExt[$format]);
+            $dbRes = \CIBlockElement::GetList([], $filter, false, false, ['ID', 'IBLOCK_ID']);
+            while ($arRes = $dbRes->GetNext()) {
+                $result[] = $arRes['ID'];
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -277,8 +310,8 @@ class GFeed {
                     strip_tags($arRes['PREVIEW_TEXT']),
                 'AVAILABLE' => $arRes['CATALOG_QUANTITY'] > 0,
                 'AVAILABLE_XML' => $arRes['CATALOG_QUANTITY'] > 0 ?
-                    self::PRODUCT_AVAILABLE_XML :
-                    self::PRODUCT_NOT_AVAILABLE_XML,
+                    self::PRODUCTS_AVAILABLE_CSV :
+                    self::PRODUCTS_NOT_AVAILABLE_CSV,
                 'AVAILABLE_CSV' => $arRes['CATALOG_QUANTITY'] > 0 ?
                     self::PRODUCTS_AVAILABLE_CSV :
                     self::PRODUCTS_NOT_AVAILABLE_CSV,
@@ -428,8 +461,9 @@ class GFeed {
 
     /**
      * Заполняет xml-файл
+     * @param $allowedIds
      */
-    private function createXml() {
+    private function createXml($allowedIds) {
         // сначала удалить старый файл
         if (file_exists($this->fileNameXml)) {
             unlink($this->fileNameXml);
@@ -448,7 +482,9 @@ class GFeed {
 
         // записать товары
         foreach ($this->elements as $item) {
-            $this->writeItemNode($item);
+            if (empty($allowedIds) || in_array($item['ID'], $allowedIds)) {
+                $this->writeItemNode($item);
+            }
         }
 
         // закрыть теги
@@ -501,8 +537,9 @@ class GFeed {
 
     /**
      * Создаёт csv-файл
+     * @param $allowedIds
      */
-    private function createCsv() {
+    private function createCsv($allowedIds) {
         // Сначала удалить старый файл
         if (file_exists($this->fileNameCsv)) {
             unlink($this->fileNameCsv);
@@ -516,7 +553,9 @@ class GFeed {
 
         // Товары
         foreach ($this->elements as $item) {
-            $this->writeCsvRow($item);
+            if (empty($allowedIds) || in_array($item['ID'], $allowedIds)) {
+                $this->writeCsvRow($item);
+            }
         }
     }
 
@@ -595,8 +634,9 @@ class GFeed {
 
     /**
      * Создаёт yml-файл
+     * @param $allowedIds
      */
-    private function createYml() {
+    private function createYml($allowedIds) {
         // Сначала удалить старый файл
         if (file_exists($this->fileNameYml)) {
             unlink($this->fileNameYml);
@@ -642,7 +682,9 @@ class GFeed {
         $this->addTag('cpa', '1');
         $this->openTag('offers', [], true);
         foreach ($this->elements as $item) {
-            $this->writeYmlOffer($item);
+            if (empty($allowedIds) || in_array($item['ID'], $allowedIds)) {
+                $this->writeYmlOffer($item);
+            }
         }
         $this->closeTag('offers');
 
@@ -712,18 +754,21 @@ class GFeed {
             $this->obtainElements();
         }
 
+        // дополнительный фильтр на результаты выборки
+        $allowedIds = $this->filterResult($format);
+
         switch ($format) {
             case self::FORMAT_XML:
                 $this->fileNameXml = $_SERVER['DOCUMENT_ROOT'].$fileName;
-                $this->createXml();
+                $this->createXml($allowedIds);
                 break;
             case self::FORMAT_CSV:
                 $this->fileNameCsv = $_SERVER['DOCUMENT_ROOT'].$fileName;
-                $this->createCsv();
+                $this->createCsv($allowedIds);
                 break;
             case self::FORMAT_YML:
                 $this->fileNameYml = $_SERVER['DOCUMENT_ROOT'].$fileName;
-                $this->createYml();
+                $this->createYml($allowedIds);
                 break;
         }
     }
@@ -764,6 +809,36 @@ class GFeed {
         $this->mappingXmlExt[$name] = $value;
         $this->mappingCsvExt[$name] = $value;
         $this->mappingYmlExt[$name] = $value;
+    }
+
+    /**
+     * Добавляет дополнительный фильтр по товарам
+     * @param $params
+     */
+    public function filterAll($params) {
+        $this->filterExt = $params;
+    }
+
+    /**
+     * Возвращает ссылку на файл относительно текущего сайта
+     * @param $fileId
+     * @return string
+     */
+    public function createSiteUrl($fileId) {
+        if ($fileId > 0) {
+            return $this->getUrl(\CFile::GetPath($fileId));
+        } else {
+            return '';
+        }
+    }
+
+    /**
+     * Добавляет дополнительный фильтр для результатов основной выборки
+     * @param $format
+     * @param $params
+     */
+    public function filterAfter($format, $params) {
+        $this->filterResultExt[$format] = $params;
     }
 
 }
