@@ -10,7 +10,6 @@ namespace Yokel\GFeed;
 use Bitrix\Main\Loader,
     Bitrix\Main\Type\DateTime,
     Bitrix\Main\Context;
-use Yok\Debug;
 
 /**
  * Class GFeed
@@ -131,6 +130,23 @@ class GFeed {
         'brand' => '',
         'google_product_category' => ''
     ];
+
+    /**
+     * @var array Маппинг полей для yml
+     */
+    private $mappingYml = [
+        'url' => '.LINK',
+        'currencyId' => 'RUB',
+        'categoryId' => 'parent.SECTION_ID',
+        'picture' => '.IMG',
+        'model' => '.NAME',
+        'description' => '.TEXT'
+    ];
+
+    /**
+     * @var array Кастомный маппинг для yml
+     */
+    private $mappingYmlExt = [];
 
     /**
      * @var array Кастомный маппинг для csv
@@ -320,7 +336,14 @@ class GFeed {
         }
     }
 
+    /**
+     * Получает разделы каталога
+     * @return array
+     */
     private function obtainSection() {
+        // var
+        $sections = [];
+
         $rsSections = \CIBlockSection::GetList(
             [
                 'ID' => 'ASC'
@@ -333,6 +356,8 @@ class GFeed {
         while ($arSection = $rsSections->Fetch()) {
             $sections[] = $arSection;
         }
+
+        return $sections;
     }
 
     /**
@@ -548,6 +573,27 @@ class GFeed {
     }
 
     /**
+     * Записывает offer в yml
+     * @param $item
+     */
+    private function writeYmlOffer($item) {
+        // открыть
+        $this->openTag('offer', [
+            'id' => $item['ID'],
+            'type' => 'vendor.model',
+            'available' => $item['AVAILABLE'] ? 'true' : 'false'
+        ], true);
+
+        // контент
+        foreach ($this->mappingYml as $tag=>$field) {
+            $this->addTag($tag, $this->getValue($field, $item));
+        }
+
+        // закрыть
+        $this->closeTag('offer');
+    }
+
+    /**
      * Создаёт yml-файл
      */
     private function createYml() {
@@ -555,6 +601,9 @@ class GFeed {
         if (file_exists($this->fileNameYml)) {
             unlink($this->fileNameYml);
         }
+
+        // маппинг
+        $this->mappingYml = array_merge($this->mappingYml, $this->mappingYmlExt);
 
         // заголовок
         $this->writeYml('<?xml version="1.0" encoding="utf-8"?>');
@@ -568,11 +617,34 @@ class GFeed {
         $this->addTag('url', $this->siteInfo['url']);
 
         // валюты
+        $this->openTag('currencies', [], true);
+        $this->addTag('currency', '', [
+            'id' => 'RUB',
+            'rate' => 1
+        ]);
+        $this->closeTag('currencies');
 
         // категории
+        $sections = $this->obtainSection();
+        $this->openTag('categories', [], true);
+        foreach ($sections as $section) {
+            $sectParams = [
+                'id' => $section['ID']
+            ];
+            if ($section['IBLOCK_SECTION_ID'] > 0) {
+                $sectParams['parentId'] = $section['IBLOCK_SECTION_ID'];
+            }
+            $this->addTag('category', $section['NAME'], $sectParams);
+        }
+        $this->closeTag('categories');
 
         // товары
         $this->addTag('cpa', '1');
+        $this->openTag('offers', [], true);
+        foreach ($this->elements as $item) {
+            $this->writeYmlOffer($item);
+        }
+        $this->closeTag('offers');
 
         // закрыть теги
         $this->closeTag('shop');
@@ -613,9 +685,15 @@ class GFeed {
         $this->protocol = $protocol.'://';
         $this->getSiteInfo();
 
-        // Цена товара с валютой
-        $this->addMappingAll('price', function ($item) {
+        // Цена товара (с валютой для xml и csv)
+        $this->addMappingCsv('price', function ($item) {
             return $item['PRICE']['PRICE'].' '.$item['PRICE']['CURRENCY'];
+        });
+        $this->addMappingXml('price', function ($item) {
+            return $item['PRICE']['PRICE'].' '.$item['PRICE']['CURRENCY'];
+        });
+        $this->addMappingYml('price', function ($item) {
+            return $item['PRICE']['PRICE'];
         });
     }
 
@@ -669,6 +747,15 @@ class GFeed {
     }
 
     /**
+     * Добавляет кастомный маппинг для yml
+     * @param $name
+     * @param $value
+     */
+    public function addMappingYml($name, $value) {
+        $this->mappingYmlExt[$name] = $value;
+    }
+
+    /**
      * Добавляет кастомный маппинг для всех форматов
      * @param $name
      * @param $value
@@ -676,6 +763,7 @@ class GFeed {
     public function addMappingAll($name, $value) {
         $this->mappingXmlExt[$name] = $value;
         $this->mappingCsvExt[$name] = $value;
+        $this->mappingYmlExt[$name] = $value;
     }
 
 }

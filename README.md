@@ -21,7 +21,8 @@ composer require yokel/gfeed
 $feed = new \Yokel\GFeed\GFeed();
 
 // Указать идентификатор инфоблока с товарами
-$feed->setIblockId(25);
+// второй параметр - идентификатор родительского инфоблока (обязательный, если есть ТП)
+$feed->setIblockId(25, 24);
 
 // Указать название поля с ценой товара (для фильтрации - исключить товары с нулевой ценой)
 $feed->setPriceField('CATALOG_PRICE_1');
@@ -31,6 +32,9 @@ $feed->export('/feed.xml');
 
 // Экспорт в csv
 $feed->export('/feed.csv', \Yokel\GFeed\GFeed::FORMAT_CSV);
+
+// Экспорт в yml
+$feed->export('/feed.xml', \Yokel\GFeed\GFeed::FORMAT_YML);
 ```
 
 ### Константы
@@ -44,6 +48,7 @@ const PRODUCTS_NOT_AVAILABLE_CSV = 'out of stock';
 const PRODUCT_NEW_CSV = 'new';
 const FORMAT_XML = 'xml';
 const FORMAT_CSV = 'csv';
+const FORMAT_YML = 'yml';
 ``` 
 
 ### Маппинг полей
@@ -56,6 +61,9 @@ function addMappingXml($name, $value)
 
 // Добавляет маппинг для csv
 function addMappingCsv($name, $value)
+
+// Добавляет маппинг для yml
+function addMappingYml($name, $value)
 
 // Добавляет маппинг для всех
 function addMappingAll($name, $value)
