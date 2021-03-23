@@ -87,7 +87,7 @@ class GFeed {
      * @var array Выбираемые поля товара
      */
     private $selectFields = [
-        'ID', 'IBLOCK_ID', 'CODE', 'TIMESTAMP_X', 'IBLOCK_SECTION_ID', 'NAME', 'PREVIEW_PICTURE', 'PROPERTY_MORE_PHOTO',
+        'ID', 'IBLOCK_ID', 'CODE', 'TIMESTAMP_X', 'IBLOCK_SECTION_ID', 'NAME','~NAME', 'PREVIEW_PICTURE', 'PROPERTY_MORE_PHOTO',
         'DETAIL_PICTURE', 'DETAIL_PAGE_URL', 'DETAIL_TEXT', 'PREVIEW_TEXT', 'PROPERTY_CML2_LINK', 'PROPERTY_SEASON'
     ];
 
@@ -301,7 +301,7 @@ class GFeed {
 
             $element = [
                 'ID' => $arRes['ID'],
-                'NAME' => $arRes['NAME'],
+                'NAME' => $arRes['~NAME'],
                 'SECTION_ID' => $arRes['IBLOCK_SECTION_ID'],
                 'LINK' => $this->getUrl($arRes['DETAIL_PAGE_URL']),
                 'IMG' => $img,
@@ -332,6 +332,7 @@ class GFeed {
 
                         $element['PARENT'] = [
                             'ID' => $arParent['ID'],
+                            'ACTIVE' => $arParent['ACTIVE'],
                             'NAME' => $arParent['NAME'],
                             'LINK' => $this->getUrl($arParent["DETAIL_PAGE_URL"]),
                             'SECTION' => $this->getSection($arParent['IBLOCK_SECTION_ID']),
@@ -364,6 +365,9 @@ class GFeed {
                 $element['SECTION'] = $this->getSection($element['SECTION_ID']);
                 $element['SECTION_CODE'] = $element['SECTION']['CODE'];
             }
+
+            // пропускать торговые предложения неактивных товаров
+            if (isset($element['PARENT']) && $element['PARENT']['ACTIVE'] !== 'Y') continue;
 
             $this->elements[] = $element;
         }
